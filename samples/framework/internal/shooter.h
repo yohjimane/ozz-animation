@@ -28,9 +28,8 @@
 #ifndef OZZ_SAMPLES_FRAMEWORK_INTERNAL_SHOOTER_H_
 #define OZZ_SAMPLES_FRAMEWORK_INTERNAL_SHOOTER_H_
 
-#include "ozz/base/containers/vector.h"
-
 #include "framework/image.h"
+#include "ozz/base/containers/vector.h"
 
 namespace ozz {
 namespace sample {

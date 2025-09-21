@@ -107,7 +107,10 @@ Application::Application()
       fps_(New<Record>(128)),
       update_time_(New<Record>(128)),
       render_time_(New<Record>(128)),
-      resolution_(resolution_presets[0]) {
+      resolution_(resolution_presets[0]),
+      use_sample_gui_(true),
+      window_(nullptr),
+      mouse_wheel_position_(0.0) {
 #ifndef NDEBUG
   // Assert presets are correctly sorted.
   for (int i = 1; i < kNumPresets; ++i) {
@@ -171,23 +174,33 @@ int Application::Run(int _argc, const char** _argv, const char* _version,
 
     // Setup GL context.
     const int gl_version_major = 3, gl_version_minor = 2;
-    glfwOpenWindowHint(GLFW_OPENGL_VERSION_MAJOR, gl_version_major);
-    glfwOpenWindowHint(GLFW_OPENGL_VERSION_MINOR, gl_version_minor);
-    glfwOpenWindowHint(GLFW_FSAA_SAMPLES, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, gl_version_major);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, gl_version_minor);
+    glfwWindowHint(GLFW_SAMPLES, 4);
 #ifndef NDEBUG
-    glfwOpenWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
+    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
 #endif  // NDEBUG
 
     // Initializes rendering before looping.
-    if (!glfwOpenWindow(resolution_.width, resolution_.height, 8, 8, 8, 8, 32,
-                        0, GLFW_WINDOW)) {
-      log::Err() << "Failed to open OpenGL window. Required OpenGL version is "
-                 << gl_version_major << "." << gl_version_minor << "."
-                 << std::endl;
+    window_ = glfwCreateWindow(resolution_.width, resolution_.height, _title,
+                               nullptr, nullptr);
+    if (!window_) {
+      log::Err()
+          << "Failed to create OpenGL window. Required OpenGL version is "
+          << gl_version_major << "." << gl_version_minor << "." << std::endl;
       success = false;
     } else {
+      glfwMakeContextCurrent(window_);
       log::Out() << "Successfully opened OpenGL window version \""
                  << glGetString(GL_VERSION) << "\"." << std::endl;
+
+      glfwSwapInterval(vertical_sync_ ? swap_interval_ : 0);
+      glfwSetWindowUserPointer(window_, this);
+      glfwSetWindowSizeCallback(window_, &ResizeCbk);
+      glfwSetFramebufferSizeCallback(window_, &ResizeCbk);
+      glfwSetWindowCloseCallback(window_, &CloseCbk);
+      glfwSetScrollCallback(window_, &ScrollCbk);
+      mouse_wheel_position_ = 0.0;
 
       // Allocates and initializes camera
       camera_ = make_unique<internal::Camera>();
@@ -204,16 +217,15 @@ int Application::Run(int _argc, const char** _argv, const char* _version,
 
       if (success) {
         shooter_ = make_unique<internal::Shooter>();
-        im_gui_ = make_unique<internal::ImGuiImpl>();
+        if (use_sample_gui_) {
+          im_gui_ = make_unique<internal::ImGuiImpl>();
+        }
 
-#ifndef EMSCRIPTEN  // Better not rename web page.
-        glfwSetWindowTitle(_title);
-#endif  // EMSCRIPTEN
-
-        // Setup the window and installs callbacks.
-        glfwSwapInterval(vertical_sync_ ? swap_interval_ : 0);
-        glfwSetWindowSizeCallback(&ResizeCbk);
-        glfwSetWindowCloseCallback(&CloseCbk);
+        int framebuffer_width = 0;
+        int framebuffer_height = 0;
+        glfwGetFramebufferSize(window_, &framebuffer_width,
+                               &framebuffer_height);
+        ResizeCbk(window_, framebuffer_width, framebuffer_height);
 
         // Loop the sample.
         success = Loop();
@@ -225,6 +237,10 @@ int Application::Run(int _argc, const char** _argv, const char* _version,
     }
 
     // Closes window and terminates GLFW.
+    if (window_) {
+      glfwDestroyWindow(window_);
+      window_ = nullptr;
+    }
     glfwTerminate();
 
   } else {
@@ -244,9 +260,13 @@ int Application::Run(int _argc, const char** _argv, const char* _version,
 
 // Helper function to detecte key pressed and released.
 template <int _Key>
-bool KeyPressed() {
-  static int previous_key = glfwGetKey(_Key);
-  const int key = glfwGetKey(_Key);
+bool KeyPressed(GLFWwindow* window) {
+  static int previous_key = GLFW_RELEASE;
+  if (!window) {
+    previous_key = GLFW_RELEASE;
+    return false;
+  }
+  const int key = glfwGetKey(window, _Key);
   const bool pressed = previous_key == GLFW_PRESS && key == GLFW_RELEASE;
   previous_key = key;
   return pressed;
@@ -256,7 +276,9 @@ Application::LoopStatus Application::OneLoop(int _loops) {
   Profiler profile(fps_.get());  // Profiles frame.
 
   // Tests for a manual exit request.
-  if (exit_ || glfwGetKey(GLFW_KEY_ESC) == GLFW_PRESS) {
+  if (exit_ ||
+      (window_ && glfwGetKey(window_, GLFW_KEY_ESCAPE) == GLFW_PRESS) ||
+      (window_ && glfwWindowShouldClose(window_))) {
     return kBreak;
   }
 
@@ -267,7 +289,8 @@ Application::LoopStatus Application::OneLoop(int _loops) {
 
 // Don't overload the cpu if the window is not active.
 #ifndef EMSCRIPTEN
-  if (OPTIONS_render && !glfwGetWindowParam(GLFW_ACTIVE)) {
+  if (OPTIONS_render && window_ &&
+      glfwGetWindowAttrib(window_, GLFW_FOCUSED) == GLFW_FALSE) {
     glfwWaitEvents();  // Wait...
 
     // Reset last update time in order to stop the time while the app isn't
@@ -275,6 +298,9 @@ Application::LoopStatus Application::OneLoop(int _loops) {
     last_idle_time_ = glfwGetTime();
 
     return kContinue;  // ...but don't do anything.
+  }
+  if (OPTIONS_render && window_) {
+    glfwPollEvents();
   }
 #else
   int width, height;
@@ -288,11 +314,11 @@ Application::LoopStatus Application::OneLoop(int _loops) {
 #endif  // EMSCRIPTEN
 
   // Enable/disable help on F1 key.
-  show_help_ = show_help_ ^ KeyPressed<GLFW_KEY_F1>();
+  show_help_ = show_help_ ^ KeyPressed<GLFW_KEY_F1>(window_);
 
   // Capture screenshot or video.
-  capture_screenshot_ = KeyPressed<'S'>();
-  capture_video_ = capture_video_ ^ KeyPressed<'V'>();
+  capture_screenshot_ = KeyPressed<GLFW_KEY_S>(window_);
+  capture_video_ = capture_video_ ^ KeyPressed<GLFW_KEY_V>(window_);
 
   // Do the main loop.
   if (!Idle(_loops == 0)) {
@@ -384,6 +410,10 @@ bool Application::Display() {
     success = Gui();
   }
 
+  if (success) {
+    success = OnRenderUiOverlay();
+  }
+
   // Capture back buffer.
   if (capture_screenshot_ || capture_video_) {
     shooter_->Capture(GL_BACK);
@@ -391,7 +421,9 @@ bool Application::Display() {
   }
 
   // Swaps current window.
-  glfwSwapBuffers();
+  if (window_) {
+    glfwSwapBuffers(window_);
+  }
 
   return success;
 }
@@ -462,16 +494,26 @@ bool Application::Gui() {
   const float kFormWidth = 200.f;
   const float kHelpMargin = 16.f;
 
+  if (!use_sample_gui_ || !im_gui_) {
+    return true;
+  }
+
   // Finds gui area.
   const float kGuiMargin = 2.f;
   ozz::math::RectInt window_rect(0, 0, resolution_.width, resolution_.height);
 
   // Fills ImGui's input structure.
   internal::ImGuiImpl::Inputs input;
-  int mouse_y;
-  glfwGetMousePos(&input.mouse_x, &mouse_y);
-  input.mouse_y = window_rect.height - mouse_y;
-  input.lmb_pressed = glfwGetMouseButton(GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+  double cursor_x = 0.0;
+  double cursor_y = 0.0;
+  if (window_) {
+    glfwGetCursorPos(window_, &cursor_x, &cursor_y);
+  }
+  input.mouse_x = static_cast<int>(cursor_x);
+  input.mouse_y = window_rect.height - static_cast<int>(cursor_y);
+  input.lmb_pressed =
+      window_ &&
+      glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
 
   // Starts frame
   im_gui_->BeginFrame(input, window_rect, renderer_.get());
@@ -602,8 +644,14 @@ bool Application::FrameworkGui() {
     ImGui::OpenClose options(im_gui, "Options", &open);
     if (open) {
       // Multi-sampling.
-      static bool fsaa_available = glfwGetWindowParam(GLFW_FSAA_SAMPLES) != 0;
-      static bool fsaa_enabled = fsaa_available;
+      const bool fsaa_available =
+          window_ && glfwGetWindowAttrib(window_, GLFW_SAMPLES) != 0;
+      static bool fsaa_enabled = false;
+      static bool fsaa_initialized = false;
+      if (!fsaa_initialized) {
+        fsaa_enabled = fsaa_available;
+        fsaa_initialized = true;
+      }
       if (im_gui->DoCheckBox("Anti-aliasing", &fsaa_enabled, fsaa_available)) {
         if (fsaa_enabled) {
           GL(Enable(GL_MULTISAMPLE));
@@ -617,7 +665,9 @@ bool Application::FrameworkGui() {
       changed |=
           im_gui->DoSlider(label, 1, 4, &swap_interval_, 1.f, vertical_sync_);
       if (changed) {
-        glfwSwapInterval(vertical_sync_ ? swap_interval_ : 0);
+        if (window_) {
+          glfwSwapInterval(vertical_sync_ ? swap_interval_ : 0);
+        }
       }
 
       im_gui->DoCheckBox("Show grid", &show_grid_, true);
@@ -642,7 +692,9 @@ bool Application::FrameworkGui() {
     if (im_gui->DoSlider(label, 0, kNumPresets - 1, &preset_lookup)) {
       // Resolution changed.
       resolution_ = resolution_presets[preset_lookup];
-      glfwSetWindowSize(resolution_.width, resolution_.height);
+      if (window_) {
+        glfwSetWindowSize(window_, resolution_.width, resolution_.height);
+      }
     }
   }
 
@@ -678,6 +730,8 @@ bool Application::OnFloatingGui(ImGui*) { return true; }
 
 bool Application::OnDisplay(Renderer*) { return true; }
 
+bool Application::OnRenderUiOverlay() { return true; }
+
 bool Application::GetCameraInitialSetup(math::Float3*, math::Float2*,
                                         float*) const {
   return false;
@@ -703,22 +757,81 @@ math::Float2 Application::WorldToScreen(const math::Float3& _world) const {
   return ret;
 }
 
-void Application::ResizeCbk(int _width, int _height) {
-  // Stores new resolution settings.
-  application_->resolution_.width = _width;
-  application_->resolution_.height = _height;
+Record* Application::GetFpsRecord() { return fps_.get(); }
 
-  // Uses the full viewport.
-  GL(Viewport(0, 0, _width, _height));
+const Record* Application::GetFpsRecord() const { return fps_.get(); }
 
-  // Forwards screen size to camera and shooter.
-  application_->camera_->Resize(_width, _height);
-  application_->shooter_->Resize(_width, _height);
+Record* Application::GetUpdateTimeRecord() { return update_time_.get(); }
+
+const Record* Application::GetUpdateTimeRecord() const {
+  return update_time_.get();
 }
 
-int Application::CloseCbk() {
-  application_->exit_ = true;
-  return GL_FALSE;  // The window will be closed while exiting the main loop.
+Record* Application::GetRenderTimeRecord() { return render_time_.get(); }
+
+const Record* Application::GetRenderTimeRecord() const {
+  return render_time_.get();
+}
+
+void Application::SetUseSampleGui(bool enabled) {
+  use_sample_gui_ = enabled;
+  if (!use_sample_gui_) {
+    im_gui_.reset();
+  }
+}
+
+Application* Application::GetCurrent() { return application_; }
+
+double Application::MouseWheelPosition() {
+  return application_ ? application_->mouse_wheel_position_ : 0.0;
+}
+
+void Application::ResizeCbk(GLFWwindow* _window, int _width, int _height) {
+  Application* app =
+      reinterpret_cast<Application*>(glfwGetWindowUserPointer(_window));
+  if (!app) {
+    return;
+  }
+
+  int framebuffer_width = _width;
+  int framebuffer_height = _height;
+  if (_window) {
+    glfwGetFramebufferSize(_window, &framebuffer_width, &framebuffer_height);
+  }
+
+  app->resolution_.width = framebuffer_width;
+  app->resolution_.height = framebuffer_height;
+
+  GL(Viewport(0, 0, framebuffer_width, framebuffer_height));
+
+  if (app->camera_) {
+    app->camera_->Resize(framebuffer_width, framebuffer_height);
+  }
+  if (app->shooter_) {
+    app->shooter_->Resize(framebuffer_width, framebuffer_height);
+  }
+}
+
+void Application::CloseCbk(GLFWwindow* _window) {
+  Application* app =
+      reinterpret_cast<Application*>(glfwGetWindowUserPointer(_window));
+  if (!app) {
+    return;
+  }
+  app->exit_ = true;
+  if (_window) {
+    glfwSetWindowShouldClose(_window, GLFW_FALSE);
+  }
+}
+
+void Application::ScrollCbk(GLFWwindow* _window, double /*_xoffset*/,
+                            double _yoffset) {
+  Application* app =
+      reinterpret_cast<Application*>(glfwGetWindowUserPointer(_window));
+  if (!app) {
+    return;
+  }
+  app->mouse_wheel_position_ += _yoffset;
 }
 
 void Application::ParseReadme() {

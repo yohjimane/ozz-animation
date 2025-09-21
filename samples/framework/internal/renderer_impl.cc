@@ -1352,8 +1352,10 @@ bool RendererImpl::DrawMesh(const Mesh& _mesh,
           uvs_stride, uvs_offset);
       shader = ambient_textured_shader.get();
 
-      // Binds default texture
-      GL(BindTexture(GL_TEXTURE_2D, checkered_texture_));
+      const GLuint texture = _options.texture_override != 0
+                                 ? _options.texture_override
+                                 : checkered_texture_;
+      GL(BindTexture(GL_TEXTURE_2D, texture));
     } else {
       ambient_shader->Bind(_transform, camera()->view_proj(), positions_stride,
                            positions_offset, normals_stride, normals_offset,
@@ -1697,8 +1699,10 @@ bool RendererImpl::DrawSkinnedMesh(
           uvs_stride, uvs_offset);
       shader = ambient_textured_shader.get();
 
-      // Binds default texture
-      GL(BindTexture(GL_TEXTURE_2D, checkered_texture_));
+      const GLuint texture = _options.texture_override != 0
+                                 ? _options.texture_override
+                                 : checkered_texture_;
+      GL(BindTexture(GL_TEXTURE_2D, texture));
     } else {
       ambient_shader->Bind(_transform, camera()->view_proj(), positions_stride,
                            positions_offset, normals_stride, normals_offset,

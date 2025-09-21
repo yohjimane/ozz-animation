@@ -28,6 +28,10 @@
 #ifndef OZZ_SAMPLES_FRAMEWORK_MESH_H_
 #define OZZ_SAMPLES_FRAMEWORK_MESH_H_
 
+#include <cstdint>
+#include <string>
+#include <vector>
+
 #include "ozz/base/containers/vector.h"
 #include "ozz/base/io/archive_traits.h"
 #include "ozz/base/maths/simd_math.h"
@@ -36,6 +40,24 @@
 
 namespace ozz {
 namespace sample {
+
+// Additional metadata we retain from the original X-Ray mesh surface.
+struct XRayMeshMetadata {
+  std::string texture_path;
+  std::string shader_name;
+  bool texture_link_present = false;
+  uint32_t texture_link = 0;
+  bool shader_link_present = false;
+  uint32_t shader_link = 0;
+  uint32_t original_vertex_count = 0;
+  uint32_t original_face_count = 0;
+  uint8_t ogf_type = 0;
+  std::vector<std::string> lod_visuals;
+  std::vector<uint8_t> lod_data;
+  uint32_t progressive_collapse_count = 0;
+  std::vector<uint8_t> progressive_data;
+  std::vector<uint32_t> child_visual_links;
+};
 
 // Defines a mesh with skinning information (joint indices and weights).
 // The mesh is subdivided into parts that group vertices according to their
@@ -68,9 +90,7 @@ struct Mesh {
   }
 
   // Test if the mesh has skinning informations.
-  bool skinned() const {
-    return !inverse_bind_poses.empty();
-  }
+  bool skinned() const { return !inverse_bind_poses.empty(); }
 
   // Returns the number of joints used to skin the mesh.
   int num_joints() const { return static_cast<int>(inverse_bind_poses.size()); }
@@ -136,6 +156,9 @@ struct Mesh {
   // Inverse bind-pose matrices. These are only available for skinned meshes.
   typedef ozz::vector<ozz::math::Float4x4> InversBindPoses;
   InversBindPoses inverse_bind_poses;
+
+  // Optional X-Ray specific metadata associated with this mesh surface.
+  XRayMeshMetadata xray_metadata;
 };
 }  // namespace sample
 
@@ -161,6 +184,17 @@ struct Extern<sample::Mesh> {
                    size_t _count);
   static void Load(IArchive& _archive, sample::Mesh* _meshes, size_t _count,
                    uint32_t _version);
+};
+
+OZZ_IO_TYPE_TAG("ozz-sample-XRayMeshMetadata", sample::XRayMeshMetadata)
+OZZ_IO_TYPE_VERSION(1, sample::XRayMeshMetadata)
+
+template <>
+struct Extern<sample::XRayMeshMetadata> {
+  static void Save(OArchive& _archive,
+                   const sample::XRayMeshMetadata* _metadata, size_t _count);
+  static void Load(IArchive& _archive, sample::XRayMeshMetadata* _metadata,
+                   size_t _count, uint32_t _version);
 };
 }  // namespace io
 }  // namespace ozz

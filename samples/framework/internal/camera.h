@@ -78,6 +78,9 @@ class Camera {
   // Resize notification, used to rebuild projection matrix.
   void Resize(int _width, int _height);
 
+  // Forces perspective or orthographic projection recalculation.
+  void RecomputeProjectionMatrices();
+
   // Get the current projection matrix.
   const math::Float4x4& projection() { return projection_; }
 
@@ -100,12 +103,20 @@ class Camera {
     bool panning;
   };
   Controls UpdateControls(float _delta_time);
+  void SnapToClosestAxis();
+  void UpdateActiveProjection();
 
   // The current projection matrix.
   math::Float4x4 projection_;
 
   // The current projection matrix.
   math::Float4x4 projection_2d_;
+
+  // Cached perspective projection matrix.
+  math::Float4x4 perspective_projection_;
+
+  // Cached orthographic projection matrix.
+  math::Float4x4 orthographic_projection_;
 
   // The current model-view matrix.
   math::Float4x4 view_;
@@ -125,7 +136,13 @@ class Camera {
   // The position of the mouse, the last time it has been seen.
   int mouse_last_x_;
   int mouse_last_y_;
-  int mouse_last_wheel_;
+  double mouse_last_wheel_;
+
+  int viewport_width_;
+  int viewport_height_;
+
+  bool orthographic_mode_;
+  bool alt_snap_active_;
 
   // Set to true to automatically frame the camera on the whole scene.
   bool auto_framing_;

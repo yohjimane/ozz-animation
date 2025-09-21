@@ -139,7 +139,8 @@ class Renderer {
     bool binormals;  // Show binormals, computed from the normal and tangent.
     bool colors;     // Show vertex colors.
     bool wireframe;  // Show vertex colors.
-    bool skip_skinning;  // Show texture (default checkered texture).
+    bool skip_skinning;             // Show texture (default checkered texture).
+    unsigned int texture_override;  // GL texture id override when texture=true.
 
     Options()
         : triangles(true),
@@ -150,7 +151,8 @@ class Renderer {
           binormals(false),
           colors(false),
           wireframe(false),
-          skip_skinning(false) {}
+          skip_skinning(false),
+          texture_override(0) {}
 
     Options(bool _triangles, bool _texture, bool _vertices, bool _normals,
             bool _tangents, bool _binormals, bool _colors, bool _wireframe,
@@ -163,7 +165,8 @@ class Renderer {
           binormals(_binormals),
           colors(_colors),
           wireframe(_wireframe),
-          skip_skinning(_skip_skinning) {}
+          skip_skinning(_skip_skinning),
+          texture_override(0) {}
   };
 
   // Renders a skinned mesh at a specified location.

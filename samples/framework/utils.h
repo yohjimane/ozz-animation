@@ -90,6 +90,10 @@ class PlaybackController {
   // Gets playback speed.
   float playback_speed() const { return playback_speed_; }
 
+  void TogglePlay() { play_ = !play_; }
+
+  void set_play(bool _play) { play_ = _play; }
+
   // Sets loop modes. If true, animation time is always clamped between 0 and 1.
   void set_loop(bool _loop) { loop_ = _loop; }
 

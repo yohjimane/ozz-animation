@@ -38,8 +38,13 @@
 // Don't allow gl.h to automatically include glext.h
 #define GL_GLEXT_LEGACY
 
-// Including glfw includes gl.h
-#include "GL/glfw.h"
+// Prevent glfw from including OpenGL headers for us.
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
+#ifndef EMSCRIPTEN
+#include <GL/gl.h>
+#endif  // EMSCRIPTEN
 
 #ifdef EMSCRIPTEN
 // include features as core functions.

@@ -29,6 +29,8 @@
 
 #include "camera.h"
 
+#include <limits>
+
 #include "framework/application.h"
 #include "framework/imgui.h"
 #include "ozz/base/log.h"
@@ -54,7 +56,6 @@ const Float2 kDefaultAngle =
 const float kAngleFactor = .01f;
 const float kDistanceFactor = .1f;
 const float kScrollFactor = .03f;
-const float kPanFactor = .05f;
 const float kKeyboardFactor = 100.f;
 const float kNear = .01f;
 const float kFar = 1000.f;
@@ -65,6 +66,8 @@ const float kFrameAllZoomOut = 1.3f;  // 30% bigger than the scene.
 Camera::Camera()
     : projection_(Float4x4::identity()),
       projection_2d_(Float4x4::identity()),
+      perspective_projection_(Float4x4::identity()),
+      orthographic_projection_(Float4x4::identity()),
       view_(Float4x4::identity()),
       view_proj_(Float4x4::identity()),
       angles_(kDefaultAngle),
@@ -72,7 +75,11 @@ Camera::Camera()
       distance_(kDefaultDistance),
       mouse_last_x_(0),
       mouse_last_y_(0),
-      mouse_last_wheel_(0),
+      mouse_last_wheel_(0.0),
+      viewport_width_(0),
+      viewport_height_(0),
+      orthographic_mode_(false),
+      alt_snap_active_(false),
       auto_framing_(true) {}
 
 Camera::~Camera() {}
@@ -138,59 +145,78 @@ Camera::Controls Camera::UpdateControls(float _delta_time) {
   controls.rotating = false;
   controls.panning = false;
 
+  Application* app = Application::GetCurrent();
+  GLFWwindow* window = app ? app->GetWindow() : nullptr;
+
   // Mouse wheel + SHIFT activates Zoom.
-  if (glfwGetKey(GLFW_KEY_LSHIFT) == GLFW_PRESS) {
-    const int w = glfwGetMouseWheel();
-    const int dw = w - mouse_last_wheel_;
-    mouse_last_wheel_ = w;
-    if (dw != 0) {
+  const double wheel_position =
+      window ? Application::MouseWheelPosition() : mouse_last_wheel_;
+  const bool shift_down =
+      window && glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS;
+  if (shift_down) {
+    const double dw = wheel_position - mouse_last_wheel_;
+    mouse_last_wheel_ = wheel_position;
+    if (dw != 0.0) {
       controls.zooming_wheel = true;
-      distance_ *= 1.f + -dw * kScrollFactor;
+      distance_ *= 1.f + static_cast<float>(-dw * kScrollFactor);
+      distance_ = ozz::math::Max(distance_, kNear);
     }
   } else {
-    mouse_last_wheel_ = glfwGetMouseWheel();
+    mouse_last_wheel_ = wheel_position;
   }
 
   // Fetches current mouse position and compute its movement since last frame.
-  int x, y;
-  glfwGetMousePos(&x, &y);
+  double cursor_x = static_cast<double>(mouse_last_x_);
+  double cursor_y = static_cast<double>(mouse_last_y_);
+  if (window) {
+    glfwGetCursorPos(window, &cursor_x, &cursor_y);
+  }
+  const int x = static_cast<int>(cursor_x);
+  const int y = static_cast<int>(cursor_y);
   const int mdx = x - mouse_last_x_;
   const int mdy = y - mouse_last_y_;
   mouse_last_x_ = x;
   mouse_last_y_ = y;
 
-  // Finds keyboard relative dx and dy commmands.
+  // Finds keyboard relative dx and dy commands.
   const int timed_factor =
       ozz::math::Max(1, static_cast<int>(kKeyboardFactor * _delta_time));
-  const int kdx =
-      timed_factor * (glfwGetKey(GLFW_KEY_LEFT) - glfwGetKey(GLFW_KEY_RIGHT));
-  const int kdy =
-      timed_factor * (glfwGetKey(GLFW_KEY_DOWN) - glfwGetKey(GLFW_KEY_UP));
+  const int left = window ? glfwGetKey(window, GLFW_KEY_LEFT) : GLFW_RELEASE;
+  const int right = window ? glfwGetKey(window, GLFW_KEY_RIGHT) : GLFW_RELEASE;
+  const int down = window ? glfwGetKey(window, GLFW_KEY_DOWN) : GLFW_RELEASE;
+  const int up = window ? glfwGetKey(window, GLFW_KEY_UP) : GLFW_RELEASE;
+  const int kdx = timed_factor * (left - right);
+  const int kdy = timed_factor * (down - up);
   const bool keyboard_interact = kdx || kdy;
 
   // Computes composed keyboard and mouse dx and dy.
   const int dx = mdx + kdx;
   const int dy = mdy + kdy;
 
+  const bool alt_down =
+      window && glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS;
+  const bool rmb_down =
+      window &&
+      glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+  const bool alt_rmb_pressed = alt_down && rmb_down;
+
+  if (!alt_rmb_pressed) {
+    alt_snap_active_ = false;
+  }
+
   // Mouse right button activates Zoom, Pan and Orbit modes.
-  if (keyboard_interact ||
-      glfwGetMouseButton(GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
-    if (glfwGetKey(GLFW_KEY_LSHIFT) == GLFW_PRESS) {  // Zoom mode.
+  if (keyboard_interact || rmb_down) {
+    if (shift_down) {  // Zoom mode.
       controls.zooming = true;
 
       distance_ += dy * kDistanceFactor;
-    } else if (glfwGetKey(GLFW_KEY_LALT) == GLFW_PRESS) {  // Pan mode.
+      distance_ = ozz::math::Max(distance_, kNear);
+    } else if (alt_down) {  // Pan mode.
+      if (!alt_snap_active_) {
+        SnapToClosestAxis();
+        alt_snap_active_ = true;
+      }
       controls.panning = true;
-
-      const float dx_pan = -dx * kPanFactor;
-      const float dy_pan = -dy * kPanFactor;
-
-      // Moves along camera axes.
-      math::Float4x4 transpose = Transpose(view_);
-      math::Float3 right_transpose, up_transpose;
-      math::Store3PtrU(transpose.cols[0], &right_transpose.x);
-      math::Store3PtrU(transpose.cols[1], &up_transpose.x);
-      center_ = center_ + right_transpose * dx_pan + up_transpose * dy_pan;
     } else {  // Orbit mode.
       controls.rotating = true;
 
@@ -212,6 +238,19 @@ Camera::Controls Camera::UpdateControls(float _delta_time) {
   // Concatenate view matrix components.
   view_ = Invert(center * y_rotation * x_rotation * distance);
 
+  const bool manual_input = controls.rotating || controls.zooming ||
+                            controls.zooming_wheel || controls.panning;
+
+  if (!alt_rmb_pressed && manual_input) {
+    orthographic_mode_ = false;
+  }
+
+  if (manual_input) {
+    auto_framing_ = false;
+  }
+
+  RecomputeProjectionMatrices();
+
   return controls;
 }
 
@@ -227,7 +266,7 @@ void Camera::OnGui(ImGui* _im_gui) {
       "-RMB: Rotate\n"
       "-Shift + Wheel: Zoom\n"
       "-Shift + RMB: Zoom\n"
-      "-Alt + RMB: Pan\n";
+      "-Alt + RMB: Snap Axis (Ortho)\n";
   _im_gui->DoLabel(controls_label, ImGui::kLeft, false);
 
   _im_gui->DoCheckBox("Automatic", &auto_framing_);
@@ -248,27 +287,117 @@ void Camera::Resize(int _width, int _height) {
   if (_width <= 0 || _height <= 0) {
     projection_ = ozz::math::Float4x4::identity();
     projection_2d_ = ozz::math::Float4x4::identity();
+    perspective_projection_ = ozz::math::Float4x4::identity();
+    orthographic_projection_ = ozz::math::Float4x4::identity();
+    viewport_width_ = 0;
+    viewport_height_ = 0;
     return;
   }
 
+  viewport_width_ = _width;
+  viewport_height_ = _height;
+
   // Compute the 3D projection matrix.
-  const float ratio = 1.f * _width / _height;
-  const float h = tan(kFovY * .5f) * kNear;
-  const float w = h * ratio;
-
-  projection_.cols[0] = math::simd_float4::Load(kNear / w, 0.f, 0.f, 0.f);
-  projection_.cols[1] = math::simd_float4::Load(0.f, kNear / h, 0.f, 0.f);
-  projection_.cols[2] =
-      math::simd_float4::Load(0.f, 0.f, -(kFar + kNear) / (kFar - kNear), -1.f);
-  projection_.cols[3] = math::simd_float4::Load(
-      0.f, 0.f, -(2.f * kFar * kNear) / (kFar - kNear), 0.f);
-
   // Computes the 2D projection matrix.
   projection_2d_.cols[0] = math::simd_float4::Load(2.f / _width, 0.f, 0.f, 0.f);
   projection_2d_.cols[1] =
       math::simd_float4::Load(0.f, 2.f / _height, 0.f, 0.f);
   projection_2d_.cols[2] = math::simd_float4::Load(0.f, 0.f, -2.0f, 0.f);
   projection_2d_.cols[3] = math::simd_float4::Load(-1.f, -1.f, 0.f, 1.f);
+
+  RecomputeProjectionMatrices();
+}
+
+void Camera::SnapToClosestAxis() {
+  // Determine current camera forward direction in world space.
+  const math::Float4x4 transpose = Transpose(view_);
+  math::Float3 forward;
+  math::SimdFloat4 forward_simd = -transpose.cols[2];
+  forward_simd = ozz::math::Normalize3(forward_simd);
+  math::Store3PtrU(forward_simd, &forward.x);
+
+  struct AxisTarget {
+    math::Float3 direction;
+  };
+
+  static const AxisTarget kTargets[] = {
+      {math::Float3(1.f, 0.f, 0.f)}, {math::Float3(-1.f, 0.f, 0.f)},
+      {math::Float3(0.f, 1.f, 0.f)}, {math::Float3(0.f, -1.f, 0.f)},
+      {math::Float3(0.f, 0.f, 1.f)}, {math::Float3(0.f, 0.f, -1.f)},
+  };
+
+  float best_dot = -std::numeric_limits<float>::infinity();
+  math::Float3 best_dir = kTargets[0].direction;
+
+  for (const AxisTarget& target : kTargets) {
+    const float dot = ozz::math::Dot(forward, target.direction);
+    if (dot > best_dot) {
+      best_dot = dot;
+      best_dir = target.direction;
+    }
+  }
+
+  // Derive Euler angles from target direction (camera forward towards center).
+  const float angle_x = asinf(best_dir.y);
+  const float angle_y = atan2(-best_dir.x, -best_dir.z);
+
+  angles_.x = angle_x;
+  angles_.y = angle_y;
+
+  orthographic_mode_ = true;
+  RecomputeProjectionMatrices();
+}
+
+void Camera::UpdateActiveProjection() {
+  projection_ =
+      orthographic_mode_ ? orthographic_projection_ : perspective_projection_;
+}
+
+void Camera::RecomputeProjectionMatrices() {
+  if (viewport_width_ <= 0 || viewport_height_ <= 0) {
+    perspective_projection_ = ozz::math::Float4x4::identity();
+    orthographic_projection_ = ozz::math::Float4x4::identity();
+    projection_ = ozz::math::Float4x4::identity();
+    return;
+  }
+
+  const float ratio = 1.f * viewport_width_ / viewport_height_;
+  const float h = tan(kFovY * .5f) * kNear;
+  const float w = h * ratio;
+
+  perspective_projection_.cols[0] =
+      math::simd_float4::Load(kNear / w, 0.f, 0.f, 0.f);
+  perspective_projection_.cols[1] =
+      math::simd_float4::Load(0.f, kNear / h, 0.f, 0.f);
+  perspective_projection_.cols[2] =
+      math::simd_float4::Load(0.f, 0.f, -(kFar + kNear) / (kFar - kNear), -1.f);
+  perspective_projection_.cols[3] = math::simd_float4::Load(
+      0.f, 0.f, -(2.f * kFar * kNear) / (kFar - kNear), 0.f);
+
+  const float safe_distance = ozz::math::Max(distance_, kNear);
+  const float ortho_half_height = safe_distance * tanf(kFovY * .5f);
+  const float ortho_half_width = ortho_half_height * ratio;
+
+  const float left = -ortho_half_width;
+  const float right = ortho_half_width;
+  const float bottom = -ortho_half_height;
+  const float top = ortho_half_height;
+
+  const float length_rl = right - left;
+  const float length_tb = top - bottom;
+  const float length_fn = kFar - kNear;
+
+  orthographic_projection_.cols[0] =
+      math::simd_float4::Load(2.f / length_rl, 0.f, 0.f, 0.f);
+  orthographic_projection_.cols[1] =
+      math::simd_float4::Load(0.f, 2.f / length_tb, 0.f, 0.f);
+  orthographic_projection_.cols[2] =
+      math::simd_float4::Load(0.f, 0.f, -2.f / length_fn, 0.f);
+  orthographic_projection_.cols[3] = math::simd_float4::Load(
+      -(right + left) / length_rl, -(top + bottom) / length_tb,
+      -(kFar + kNear) / length_fn, 1.f);
+
+  UpdateActiveProjection();
 }
 }  // namespace internal
 }  // namespace sample

@@ -28,11 +28,11 @@
 #define OZZ_INCLUDE_PRIVATE_HEADER  // Allows to include private headers.
 
 #include "framework/profile.h"
-#include "framework/internal/renderer_impl.h"
 
 #include <cfloat>
 #include <cmath>
 
+#include "framework/internal/renderer_impl.h"
 #include "ozz/base/memory/allocator.h"
 
 namespace ozz {

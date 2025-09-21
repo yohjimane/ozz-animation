@@ -30,8 +30,12 @@
 
 #include <cstddef>
 
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
 #include "ozz/base/containers/string.h"
 #include "ozz/base/memory/unique_ptr.h"
+#include "profile.h"
 
 namespace ozz {
 namespace math {
@@ -79,9 +83,24 @@ class Application {
   int Run(int _argc, const char** _argv, const char* _version,
           const char* _title);
 
+  void SetUseSampleGui(bool enabled);
+
+  GLFWwindow* GetWindow() const { return window_; }
+
+  static double MouseWheelPosition();
+
+  static Application* GetCurrent();
+
  protected:
   // Allows application to convert from world space to screen coordinates.
   math::Float2 WorldToScreen(const math::Float3& _world) const;
+
+  Record* GetFpsRecord();
+  const Record* GetFpsRecord() const;
+  Record* GetUpdateTimeRecord();
+  const Record* GetUpdateTimeRecord() const;
+  Record* GetRenderTimeRecord();
+  const Record* GetRenderTimeRecord() const;
 
  private:
   // Provides initialization event to the inheriting application. Called while
@@ -114,6 +133,13 @@ class Application {
   // stop the loop and exit the application with EXIT_FAILURE. Note that
   // OnDestroy is called in any case.
   virtual bool OnFloatingGui(ImGui* _im_gui);
+
+  // Provides an additional overlay rendering event that is invoked after the
+  // framework finishes its own rendering work (grid, axes, sample GUI). This
+  // is useful for integrating external UI systems that must appear above the
+  // rest of the scene. Returning false will abort the frame, mirroring the
+  // behaviour of the other callbacks.
+  virtual bool OnRenderUiOverlay();
 
   // Provides display event to the inheriting application.
   // This function is called in between the clear and swap functions.
@@ -169,10 +195,13 @@ class Application {
   bool FrameworkGui();
 
   // Implements framework glfw window reshape callback.
-  static void ResizeCbk(int _width, int _height);
+  static void ResizeCbk(GLFWwindow* _window, int _width, int _height);
 
   // Implements framework glfw window close callback.
-  static int CloseCbk();
+  static void CloseCbk(GLFWwindow* _window);
+
+  // Implements framework glfw scroll callback.
+  static void ScrollCbk(GLFWwindow* _window, double _xoffset, double _yoffset);
 
   // Get README.md for content to display it in the help ui.
   void ParseReadme();
@@ -198,6 +227,14 @@ class Application {
 
   // Update time scale factor.
   float time_factor_;
+
+  bool use_sample_gui_;
+
+  // GLFW window handle.
+  GLFWwindow* window_;
+
+  // Aggregated scroll wheel position.
+  double mouse_wheel_position_;
 
   // Current application time, including scaling and freezes..
   float time_;

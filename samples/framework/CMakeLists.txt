@@ -28,19 +28,40 @@ add_library(sample_framework STATIC
   internal/shooter.h
   internal/shooter.cc)
 
-# Samples requires OpenGL package.
+# Samples require OpenGL package.
 if(NOT EMSCRIPTEN)
-  add_subdirectory(${PROJECT_SOURCE_DIR}/extern/glfw glfw)
-  target_link_libraries(sample_framework glfw)
+  find_package(OpenGL REQUIRED)
+  find_package(glfw3 CONFIG QUIET)
+  if(TARGET glfw)
+    target_link_libraries(sample_framework PUBLIC glfw)
+  elseif(TARGET glfw3)
+    target_link_libraries(sample_framework PUBLIC glfw3)
+  else()
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+      pkg_check_modules(GLFW3 QUIET glfw3)
+    endif()
+    if(GLFW3_FOUND)
+      target_include_directories(sample_framework PUBLIC ${GLFW3_INCLUDE_DIRS})
+      target_link_libraries(sample_framework PUBLIC ${GLFW3_LIBRARIES})
+    else()
+      message(FATAL_ERROR "glfw3 is required to build sample_framework")
+    endif()
+  endif()
+  target_link_libraries(sample_framework PUBLIC OpenGL::GL)
 else()
-  target_link_options(sample_framework PUBLIC -sUSE_GLFW=2 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2)
+  target_link_options(sample_framework PUBLIC
+    -sUSE_GLFW=2
+    -sMIN_WEBGL_VERSION=2
+    -sMAX_WEBGL_VERSION=2)
 endif()
 
-target_link_libraries(sample_framework
-  ozz_geometry
-  ozz_animation_offline
-  ozz_options)
-  
+# Link against ozz libs
+if(ozz_build_tools)
+  target_link_libraries(sample_framework PUBLIC ozz_options)
+endif()
+target_link_libraries(sample_framework PRIVATE ozz_geometry ozz_animation_offline)
+
 target_include_directories(sample_framework PUBLIC
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/samples>
   $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/samples>)
