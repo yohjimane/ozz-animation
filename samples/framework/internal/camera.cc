@@ -57,6 +57,7 @@ const float kAngleFactor = .01f;
 const float kDistanceFactor = .1f;
 const float kScrollFactor = .03f;
 const float kKeyboardFactor = 100.f;
+const float kPanLimitDistance = 0.001f;
 const float kNear = .01f;
 const float kFar = 1000.f;
 const float kFovY = ozz::math::kPi / 3.f;
@@ -145,6 +146,10 @@ Camera::Controls Camera::UpdateControls(float _delta_time) {
   controls.rotating = false;
   controls.panning = false;
 
+  float pan_dx = 0.f;
+  float pan_dy = 0.f;
+  bool pan_mode_active = false;
+
   Application* app = Application::GetCurrent();
   GLFWwindow* window = app ? app->GetWindow() : nullptr;
 
@@ -198,26 +203,40 @@ Camera::Controls Camera::UpdateControls(float _delta_time) {
   const bool rmb_down =
       window &&
       glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+  const bool mmb_down =
+      window &&
+      glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS;
   const bool alt_rmb_pressed = alt_down && rmb_down;
 
   if (!alt_rmb_pressed) {
     alt_snap_active_ = false;
   }
 
-  // Mouse right button activates Zoom, Pan and Orbit modes.
-  if (keyboard_interact || rmb_down) {
-    if (shift_down) {  // Zoom mode.
+  // Mouse buttons activate navigation modes.
+  if (keyboard_interact || rmb_down || mmb_down) {
+    const bool zoom_mode = shift_down && rmb_down && !mmb_down;
+    const bool pan_mode = mmb_down || (alt_down && rmb_down);
+
+    if (zoom_mode) {
       controls.zooming = true;
 
       distance_ += dy * kDistanceFactor;
       distance_ = ozz::math::Max(distance_, kNear);
-    } else if (alt_down) {  // Pan mode.
-      if (!alt_snap_active_) {
-        SnapToClosestAxis();
-        alt_snap_active_ = true;
-      }
+    } else if (pan_mode) {
       controls.panning = true;
-    } else {  // Orbit mode.
+      pan_mode_active = true;
+      pan_dx = static_cast<float>(dx);
+      pan_dy = static_cast<float>(dy);
+
+      if (alt_down && rmb_down && !mmb_down) {
+        if (!alt_snap_active_) {
+          SnapToClosestAxis();
+          alt_snap_active_ = true;
+        }
+      } else {
+        alt_snap_active_ = false;
+      }
+    } else {
       controls.rotating = true;
 
       angles_.x = fmodf(angles_.x - dy * kAngleFactor, ozz::math::k2Pi);
@@ -226,17 +245,44 @@ Camera::Controls Camera::UpdateControls(float _delta_time) {
   }
 
   // Build the model view matrix components.
-  const Float4x4 center = Float4x4::Translation(
-      math::simd_float4::Load(center_.x, center_.y, center_.z, 1.f));
   const Float4x4 y_rotation = Float4x4::FromAxisAngle(
       math::simd_float4::y_axis(), math::simd_float4::Load1(angles_.y));
   const Float4x4 x_rotation = Float4x4::FromAxisAngle(
       math::simd_float4::x_axis(), math::simd_float4::Load1(angles_.x));
+  const Float4x4 rotation = y_rotation * x_rotation;
+
+  if (pan_mode_active && viewport_width_ > 0 && viewport_height_ > 0) {
+    const float safe_distance = ozz::math::Max(distance_, kNear);
+    if (safe_distance > kPanLimitDistance) {
+      const float aspect = static_cast<float>(viewport_width_) /
+                           static_cast<float>(viewport_height_);
+      const float world_height = 2.f * safe_distance * tanf(kFovY * .5f);
+      const float world_width = world_height * aspect;
+      const float pan_scale_x =
+          world_width / static_cast<float>(viewport_width_);
+      const float pan_scale_y =
+          world_height / static_cast<float>(viewport_height_);
+      const float pan_world_x = -pan_dx * pan_scale_x;
+      const float pan_world_y = pan_dy * pan_scale_y;
+
+      math::Float3 right;
+      math::Float3 up;
+      math::Store3PtrU(rotation.cols[0], &right.x);
+      math::Store3PtrU(rotation.cols[1], &up.x);
+
+      center_.x += pan_world_x * right.x + pan_world_y * up.x;
+      center_.y += pan_world_x * right.y + pan_world_y * up.y;
+      center_.z += pan_world_x * right.z + pan_world_y * up.z;
+    }
+  }
+
+  const Float4x4 center = Float4x4::Translation(
+      math::simd_float4::Load(center_.x, center_.y, center_.z, 1.f));
   const Float4x4 distance =
       Float4x4::Translation(math::simd_float4::Load(0.f, 0.f, distance_, 1.f));
 
   // Concatenate view matrix components.
-  view_ = Invert(center * y_rotation * x_rotation * distance);
+  view_ = Invert(center * rotation * distance);
 
   const bool manual_input = controls.rotating || controls.zooming ||
                             controls.zooming_wheel || controls.panning;
@@ -266,6 +312,7 @@ void Camera::OnGui(ImGui* _im_gui) {
       "-RMB: Rotate\n"
       "-Shift + Wheel: Zoom\n"
       "-Shift + RMB: Zoom\n"
+      "-MMB: Pan\n"
       "-Alt + RMB: Snap Axis (Ortho)\n";
   _im_gui->DoLabel(controls_label, ImGui::kLeft, false);
 

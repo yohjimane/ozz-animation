@@ -57,6 +57,13 @@ struct XRayMeshMetadata {
   uint32_t progressive_collapse_count = 0;
   std::vector<uint8_t> progressive_data;
   std::vector<uint32_t> child_visual_links;
+  // Optional conversion debug data: maps between original (OGF) vertex
+  // indices and the remapped indices written into the ozz mesh. When
+  // populated, original_to_remapped has one entry per original vertex,
+  // while remapped_to_original has one entry per exported vertex in the
+  // combined mesh parts.
+  std::vector<uint32_t> original_to_remapped;
+  std::vector<uint32_t> remapped_to_original;
 };
 
 // Defines a mesh with skinning information (joint indices and weights).
@@ -147,6 +154,16 @@ struct Mesh {
   typedef ozz::vector<uint16_t> TriangleIndices;
   TriangleIndices triangle_indices;
 
+#if !defined(NDEBUG)
+  // Debug-only: map from original vertex index (as in source OGF surface)
+  // to remapped/index-within-parts after conversion. Also the reverse map
+  // for quick lookup of original given a remapped vertex index.
+  // These buffers are optional and only populated by our converter in Debug.
+  typedef ozz::vector<uint32_t> DebugIndexMap;
+  DebugIndexMap debug_original_to_remapped;
+  DebugIndexMap debug_remapped_to_original;
+#endif
+
   // Joints remapping indices. As a skin might be influenced by a part of the
   // skeleton only, joint indices and inverse bind pose matrices are reordered
   // to contain only used ones. Note that this array is sorted.
@@ -187,7 +204,7 @@ struct Extern<sample::Mesh> {
 };
 
 OZZ_IO_TYPE_TAG("ozz-sample-XRayMeshMetadata", sample::XRayMeshMetadata)
-OZZ_IO_TYPE_VERSION(1, sample::XRayMeshMetadata)
+OZZ_IO_TYPE_VERSION(2, sample::XRayMeshMetadata)
 
 template <>
 struct Extern<sample::XRayMeshMetadata> {

@@ -78,6 +78,8 @@ void Extern<sample::XRayMeshMetadata>::Save(
     _archive << data.progressive_collapse_count;
     _archive << data.progressive_data;
     _archive << data.child_visual_links;
+    _archive << data.original_to_remapped;
+    _archive << data.remapped_to_original;
   }
 }
 
@@ -109,6 +111,13 @@ void Extern<sample::XRayMeshMetadata>::Load(IArchive& _archive,
     _archive >> data.progressive_collapse_count;
     _archive >> data.progressive_data;
     _archive >> data.child_visual_links;
+    if (_version >= 2) {
+      _archive >> data.original_to_remapped;
+      _archive >> data.remapped_to_original;
+    } else {
+      data.original_to_remapped.clear();
+      data.remapped_to_original.clear();
+    }
   }
 }
 
