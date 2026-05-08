@@ -71,5 +71,6 @@ if(TARGET BUILD_DATA_SAMPLE)
 endif()
 
 set_target_properties(sample_framework PROPERTIES FOLDER "samples")
+target_compile_options(sample_framework PRIVATE -Wno-error -Wno-reorder-ctor -Wno-deprecated-declarations)
 
 add_subdirectory(tools)

@@ -60,6 +60,10 @@ Shooter::Shooter()
 
   // OpenGL ES2 compatibility extension allows to query for implementation best
   // format and type.
+#ifndef GL_IMPLEMENTATION_COLOR_READ_FORMAT_OES
+#define GL_IMPLEMENTATION_COLOR_READ_FORMAT_OES 0x8B9B
+#define GL_IMPLEMENTATION_COLOR_READ_TYPE_OES 0x8B9A
+#endif
   if (glfwExtensionSupported("GL_ARB_ES2_compatibility") != 0) {
     GLint format;
     GL(GetIntegerv(GL_IMPLEMENTATION_COLOR_READ_FORMAT_OES, &format));

@@ -43,7 +43,12 @@
 #include <GLFW/glfw3.h>
 
 #ifndef EMSCRIPTEN
+#ifdef __APPLE__
+#define GL_SILENCE_DEPRECATION
+#include <OpenGL/gl3.h>
+#else
 #include <GL/gl.h>
+#endif
 #endif  // EMSCRIPTEN
 
 #ifdef EMSCRIPTEN
@@ -66,7 +71,9 @@
 #endif  // EMSCRIPTEN
 
 // Include features as extentions
+#ifndef __APPLE__
 #include "GL/glext.h"
+#endif
 #include "framework/renderer.h"
 #include "ozz/base/containers/vector.h"
 #include "ozz/base/log.h"
@@ -368,8 +375,14 @@ extern PFNGLISVERTEXARRAYPROC glIsVertexArray;
 
 // OpenGL ARB_instanced_arrays extension, optional.
 extern bool GL_ARB_instanced_arrays_supported;
+#ifdef __APPLE__
+extern PFNGLVERTEXATTRIBDIVISORPROC glVertexAttribDivisor_;
+extern PFNGLDRAWARRAYSINSTANCEDPROC glDrawArraysInstanced_;
+extern PFNGLDRAWELEMENTSINSTANCEDPROC glDrawElementsInstanced_;
+#else
 extern PFNGLVERTEXATTRIBDIVISORARBPROC glVertexAttribDivisor_;
 extern PFNGLDRAWARRAYSINSTANCEDARBPROC glDrawArraysInstanced_;
 extern PFNGLDRAWELEMENTSINSTANCEDARBPROC glDrawElementsInstanced_;
+#endif
 
 #endif  // OZZ_SAMPLES_FRAMEWORK_INTERNAL_RENDERER_IMPL_H_

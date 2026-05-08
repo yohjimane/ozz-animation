@@ -1858,6 +1858,13 @@ bool RendererImpl::InitOpenGLExtensions() {
                << std::endl;
   }
 
+#ifdef __APPLE__
+  GL_ARB_instanced_arrays_supported = true;
+  glVertexAttribDivisor_ = glVertexAttribDivisor;
+  glDrawArraysInstanced_ = glDrawArraysInstanced;
+  glDrawElementsInstanced_ = glDrawElementsInstanced;
+  if (false) {
+#else
   GL_ARB_instanced_arrays_supported =
       glfwExtensionSupported("GL_ARB_instanced_arrays") != 0;
   if (GL_ARB_instanced_arrays_supported) {
@@ -1877,6 +1884,7 @@ bool RendererImpl::InitOpenGLExtensions() {
       GL_ARB_instanced_arrays_supported = false;
     }
   } else {
+#endif
     log::Log() << "Optional GL_ARB_instanced_arrays extensions not found."
                << std::endl;
   }
@@ -1985,6 +1993,12 @@ OZZ_DECL_GL_EXT(glIsVertexArray, PFNGLISVERTEXARRAYPROC);
 #endif  // OZZ_GL_VERSION_3_0_EXT
 
 bool GL_ARB_instanced_arrays_supported = false;
+#ifdef __APPLE__
+OZZ_DECL_GL_EXT(glVertexAttribDivisor_, PFNGLVERTEXATTRIBDIVISORPROC);
+OZZ_DECL_GL_EXT(glDrawArraysInstanced_, PFNGLDRAWARRAYSINSTANCEDPROC);
+OZZ_DECL_GL_EXT(glDrawElementsInstanced_, PFNGLDRAWELEMENTSINSTANCEDPROC);
+#else
 OZZ_DECL_GL_EXT(glVertexAttribDivisor_, PFNGLVERTEXATTRIBDIVISORARBPROC);
 OZZ_DECL_GL_EXT(glDrawArraysInstanced_, PFNGLDRAWARRAYSINSTANCEDARBPROC);
 OZZ_DECL_GL_EXT(glDrawElementsInstanced_, PFNGLDRAWELEMENTSINSTANCEDARBPROC);
+#endif
